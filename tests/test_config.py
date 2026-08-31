@@ -144,10 +144,11 @@ def test_invalid_ip_source_in_file_is_rejected_at_load(tmp_path):
         load_config(write_config(tmp_path, text))
 
 
-def test_no_auth_method_is_allowed(tmp_path):
-    # Neither credential_id nor key_file is required: a target may rely on
-    # whatever auth Termix applies without an explicit flag (e.g. a
-    # folder's assigned credential).
+def test_no_auth_method_resolved_is_an_error(tmp_path):
+    # Confirmed against a real server: `termix hosts create` hard-requires
+    # --password/--key-file/--credential-id and has no folder-level
+    # credential fallback, so catch this at config load, not per-host at
+    # sync time.
     text = """
 [termix]
 folder = "AWS"
@@ -157,9 +158,8 @@ folder = "AWS"
 [[aws.targets]]
 region = "us-east-1"
 """
-    config = load_config(write_config(tmp_path, text))
-    assert config.targets[0].credential_id is None
-    assert config.targets[0].key_file is None
+    with pytest.raises(ConfigError, match="no SSH auth method resolved"):
+        load_config(write_config(tmp_path, text))
 
 
 def test_key_file_auth_is_accepted(tmp_path):

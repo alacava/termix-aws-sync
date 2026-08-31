@@ -241,10 +241,12 @@ def load_config(cli_path: Optional[str] = None) -> Config:
             raise ConfigError(f"{where}: 'credential_id' must be an integer")
         if key_file is not None and not isinstance(key_file, str):
             raise ConfigError(f"{where}: 'key_file' must be a string")
-        # Neither set is allowed: no --credential-id/--key-file flag is then
-        # passed to `termix hosts create`/`update`, and the host falls back
-        # to whatever auth Termix applies by default (e.g. a folder's
-        # assigned credential). See README.md's config reference.
+        if credential_id is None and not key_file:
+            raise ConfigError(
+                f"{where}: no SSH auth method resolved; set 'credential_id' or "
+                "'key_file' (per-target or in [termix]) -- `termix hosts create` "
+                "hard-requires one and has no folder-level credential fallback"
+            )
 
         target_ip_source = _extract_ip_source(raw, where) or global_ip_source
 

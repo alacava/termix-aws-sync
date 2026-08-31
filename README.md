@@ -197,20 +197,23 @@ region = "us-east-1"
 
 At least one `[[aws.targets]]` entry is required. Each target needs
 `region`; `profile` and `name` are optional (omit `profile` to use the
-default AWS credential chain — env vars or an instance role). `ip_source`
-and `default_username` are also resolved per-target (target overrides
-global), and both can be overridden again for a single instance via its
-EC2 tags (`termix:ip`, `termix:user`).
+default AWS credential chain — env vars or an instance role). Every target
+must resolve an SSH auth method (`credential_id` or `key_file`, per-target
+or inherited from `[termix]`) — config load fails with a clear error
+otherwise. This is a hard requirement of the `termix` CLI itself
+(confirmed against a real server: `hosts create` rejects the call outright
+with "needs an auth method: pass --password, --key-file or
+--credential-id" if neither is given) — there is no folder-level
+credential fallback, so it's caught here at config load rather than
+failing on every single host, every cycle, forever. `ip_source` and
+`default_username` are also resolved per-target (target overrides global),
+and both can be overridden again for a single instance via its EC2 tags
+(`termix:ip`, `termix:user`).
 
-`credential_id`/`key_file` are optional, resolved the same way (per-target
-overrides global). If neither resolves for a target, no `--credential-id`
-or `--key-file` flag is sent at all when creating/updating its hosts, and
-the host falls back to whatever auth Termix applies by default — e.g. a
-credential assigned at the folder level. Whether that actually works
-depends on your Termix server/version (the documented CLI treats an auth
-method as required — see BUILD_BRIEF.md §3), so verify it against your
-setup; a rejection surfaces as a normal per-host create/update failure
-(logged, counted, sync loop continues), not a crash.
+If you want every host in one environment to share a single credential
+without repeating it per instance, set `credential_id` once on that
+target (or globally in `[termix]`) — that already applies to every host
+synced from it, which is the practical equivalent of a "folder default."
 
 **Env overrides** (highest precedence for the values they cover, primarily
 for Docker):
