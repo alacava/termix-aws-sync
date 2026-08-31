@@ -32,6 +32,12 @@ exist in that mounted directory — or from `AWS_ACCESS_KEY_ID` /
 `AWS_SECRET_ACCESS_KEY` set in `.env` as an alternative for a single
 implicit profile.
 
+Pre-built images are published to Docker Hub as
+[`antlac1/termix-aws-sync`](https://hub.docker.com/r/antlac1/termix-aws-sync)
+on every version tag. To use one instead of building locally, swap
+`docker-compose.yml`'s `build: .` for `image: antlac1/termix-aws-sync:latest`
+(or a specific version, e.g. `:0.1.0`).
+
 ## Bare-metal install
 
 Requires Python 3.9+, [awscli v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html),
@@ -332,6 +338,15 @@ pytest
 ruff check .
 docker build -t termix-aws-sync .
 ```
+
+## Releasing
+
+Pushing a tag matching `v*.*.*` (e.g. `v0.1.0`) runs the full CI suite and,
+if it passes, builds and pushes a `linux/amd64` image to Docker Hub as
+`antlac1/termix-aws-sync:<version>`, `:<major.minor>`, and `:latest` — see
+`.github/workflows/ci.yml`'s `publish` job. This requires a repo secret
+`DOCKERHUB_TOKEN` (a Docker Hub access token — Account Settings -> Security
+-> Access Tokens — not the account password).
 
 ## License
 

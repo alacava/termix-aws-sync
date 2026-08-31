@@ -1,7 +1,9 @@
 services:
   sync:
     build: .
-    # image: ghcr.io/<owner>/termix-aws-sync:latest   # once published
+    # Pre-built image, published by .github/workflows/ci.yml on version tags.
+    # Swap to this (and drop `build: .`) to skip building locally:
+    # image: antlac1/termix-aws-sync:latest
     restart: unless-stopped
     env_file: .env   # TERMIX_API_KEY, SYNC_INTERVAL, optional IP_SOURCE/TERMIX_URL
     volumes:
