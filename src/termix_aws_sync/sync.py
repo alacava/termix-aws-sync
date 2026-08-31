@@ -76,19 +76,19 @@ def apply_plan(
     for iid in plan.create:
         try:
             create_host(desired[iid], runner)
-        except RuntimeError as e:
+        except Exception as e:  # broad on purpose: one bad host must not abort the rest
             failures += 1
             log.error("create failed for %s: %s", iid, e)
     for iid in plan.update:
         try:
             update_host(current[iid].id, desired[iid], runner)
-        except RuntimeError as e:
+        except Exception as e:  # broad on purpose: one bad host must not abort the rest
             failures += 1
             log.error("update failed for %s: %s", iid, e)
     for iid in plan.delete:
         try:
             delete_host(current[iid], runner)
-        except RuntimeError as e:
+        except Exception as e:  # broad on purpose: one bad host must not abort the rest
             failures += 1
             log.error("delete failed for %s: %s", iid, e)
     return failures

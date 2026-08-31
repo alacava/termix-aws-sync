@@ -1,13 +1,20 @@
 """Termix side: list/create/update/delete hosts via the `termix` CLI.
 
-Known unknown (see BUILD_BRIEF.md §3): the exact JSON field names emitted by
-`termix hosts list --json` are assumed to be `id`, `name`, `ip`, `port`,
-`username`, `tags`, and `folder`. That assumption is isolated to
-`fetch_termix_hosts()` below and to `sync.drifted()`, which reads the same
-fields off the dicts this function returns. If real-world output uses
-different field names, update the `.get(...)` calls in those two places --
-run with `--debug` to dump the raw `termix hosts list --json` output and
-compare. See README.md's troubleshooting section.
+Known unknown (see BUILD_BRIEF.md §3): the exact JSON shape emitted by
+`termix hosts list --json` is assumed. Two assumptions are isolated here:
+
+  * The top-level response is a bare array. `_extract_host_list()` also
+    tolerates it being wrapped in an object under a `hosts`/`data`/`items`/
+    `results` key, since real output has been observed doing this.
+  * Each host object uses field names `id`, `name`, `ip`, `port`,
+    `username`, `tags`, and `folder`. That assumption is isolated to
+    `fetch_termix_hosts()` below and to `sync.drifted()`, which reads the
+    same fields off the dicts this function returns.
+
+If real-world output differs further, update `_extract_host_list()` (shape)
+or the `.get(...)` calls in `fetch_termix_hosts()`/`sync.drifted()` (field
+names) -- run with `--debug` to see the raw response and compare. See
+README.md's troubleshooting section.
 """
 
 from __future__ import annotations
@@ -25,6 +32,27 @@ from .runner import Runner, default_runner
 ID_TAG_RE = re.compile(r"^aws-id-(i-[0-9a-f]+)$")
 
 log = logging.getLogger("termix-aws-sync")
+
+# If `termix hosts list --json` wraps the array in an object instead of
+# returning it bare, try these keys (in order) to find the actual list --
+# part of the same known-unknown as the per-host field names above.
+_LIST_WRAPPER_KEYS = ("hosts", "data", "items", "results")
+
+
+def _extract_host_list(payload: Any, where: str) -> List[Any]:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in _LIST_WRAPPER_KEYS:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+        raise RuntimeError(
+            f"{where} returned a JSON object with no recognized list field "
+            f"(tried {', '.join(_LIST_WRAPPER_KEYS)}); run with --debug to see "
+            "the raw response and see README.md's troubleshooting section"
+        )
+    raise RuntimeError(f"{where} returned unexpected JSON: a bare {type(payload).__name__}")
 
 
 def _termix_bin() -> str:
@@ -51,12 +79,17 @@ def fetch_termix_hosts(
     config: Config, runner: Runner = default_runner
 ) -> Dict[str, TermixHost]:
     """Return {instance_id: TermixHost} for hosts carrying the managed tag."""
-    hosts = runner(
-        [_termix_bin(), "hosts", "list", "--tag", config.managed_tag, "--json"],
-        parse_json=True,
-    )
+    cmd = [_termix_bin(), "hosts", "list", "--tag", config.managed_tag, "--json"]
+    payload = runner(cmd, parse_json=True)
+    hosts = _extract_host_list(payload, " ".join(cmd))
+
     managed: Dict[str, TermixHost] = {}
     for h in hosts:
+        if not isinstance(h, dict):
+            log.warning(
+                "skipping unexpected non-object entry in termix hosts list output: %r", h
+            )
+            continue
         tags = h.get("tags") or []
         instance_id = None
         for tag in tags:

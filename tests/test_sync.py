@@ -168,6 +168,39 @@ def test_managed_tag_filter_is_passed_to_termix_list(tmp_path):
     assert call[call.index("--tag") + 1] == "aws-sync"
 
 
+def test_fetch_termix_hosts_unwraps_dict_response(tmp_path):
+    # Regression: real-world `termix hosts list --json` output has been
+    # observed wrapping the array in an object rather than returning it
+    # bare, e.g. {"hosts": [...]}. Iterating a dict yields its string keys,
+    # which used to crash with AttributeError deep inside the per-host loop.
+    config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
+    payload = {
+        "hosts": [
+            {"id": 101, "name": "existing", "tags": ["aws-sync", "aws-id-i-1"]},
+        ]
+    }
+    runner = FakeRunner(hosts=payload)
+    managed = fetch_termix_hosts(config, runner)
+    assert list(managed) == ["i-1"]
+    assert managed["i-1"].id == 101
+
+
+def test_fetch_termix_hosts_rejects_unrecognized_dict_shape(tmp_path):
+    config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
+    runner = FakeRunner(hosts={"unexpected_key": []})
+    with pytest.raises(RuntimeError, match="no recognized list field"):
+        fetch_termix_hosts(config, runner)
+
+
+def test_fetch_termix_hosts_skips_non_dict_entries(tmp_path, caplog):
+    config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
+    runner = FakeRunner(hosts=["not-a-host-object"])
+    with caplog.at_level("WARNING"):
+        managed = fetch_termix_hosts(config, runner)
+    assert managed == {}
+    assert "unexpected non-object entry" in caplog.text
+
+
 def _single_target_config():
     import tempfile
     from pathlib import Path
@@ -205,6 +238,26 @@ def test_apply_plan_issues_exactly_create_update_delete(monkeypatch):
     # update targets the existing termix host id, not the instance id
     update_cmd = calls[1]
     assert "201" in update_cmd
+
+
+def test_apply_plan_survives_non_runtimeerror_failure(caplog):
+    # A single bad operation raising something other than RuntimeError (e.g.
+    # a bug, or an unexpected response shape) must still be counted as a
+    # failure and must not stop the remaining operations from running.
+    d = {"i-bad": desired("i-bad"), "i-ok": desired("i-ok")}
+    c = {}
+    plan = build_plan(d, c)
+    assert sorted(plan.create) == ["i-bad", "i-ok"]
+
+    def runner(cmd, parse_json=False):
+        if "i-bad" in cmd:
+            raise KeyError("boom")
+        return ""
+
+    with caplog.at_level("ERROR"):
+        failures = apply_plan(plan, d, c, runner)
+    assert failures == 1
+    assert "create failed for i-bad" in caplog.text
 
 
 # ---------------------------------------------------------------------------

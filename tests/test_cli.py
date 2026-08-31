@@ -1,4 +1,12 @@
-from termix_aws_sync.cli import EXIT_CONFIG_ERROR, EXIT_OK, main, parse_args, resolve_interval
+from termix_aws_sync.cli import (
+    EXIT_CONFIG_ERROR,
+    EXIT_OK,
+    main,
+    parse_args,
+    resolve_interval,
+    run_cycle,
+)
+from termix_aws_sync.config import load_config
 
 
 def write_config(tmp_path, text):
@@ -80,6 +88,27 @@ def test_sync_interval_env_used_without_dry_run(monkeypatch):
     monkeypatch.setenv("SYNC_INTERVAL", "42")
     args = parse_args([])
     assert resolve_interval(args) == 42
+
+
+def test_run_cycle_never_raises_on_unexpected_termix_response_shape(tmp_path, caplog):
+    # Regression: a real Termix server returned `hosts list --json` wrapped
+    # in an object with no recognized list key. That used to raise deep
+    # inside fetch_termix_hosts as an AttributeError, which run_cycle's
+    # narrower `except RuntimeError` didn't catch -- crashing the process
+    # and, under `restart: unless-stopped`, crash-looping the container.
+    config = load_config(write_config(tmp_path, VALID_CONFIG))
+
+    def runner(cmd, parse_json=False):
+        if "describe-instances" in cmd:
+            return []
+        if "list" in cmd:
+            return {"totally_unexpected_key": []}
+        return ""
+
+    with caplog.at_level("ERROR"):
+        code = run_cycle(config, dry_run=True, runner=runner)
+    assert code == EXIT_CONFIG_ERROR
+    assert "failed to fetch state" in caplog.text
 
 
 def test_version_flag_exits_0(capsys):

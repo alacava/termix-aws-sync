@@ -304,25 +304,40 @@ all; everything else is ignored by both the create and delete paths.
 only manages hosts it tagged itself; a hand-created host with the managed
 tag but no identity tag is skipped and logged, by design.
 
-**JSON field names from `termix hosts list --json`.** This tool assumes
-that command emits `id`, `name`, `ip`, `port`, `username`, `tags`, and
-`folder` fields per host (see `src/termix_aws_sync/termix.py`'s module
-docstring for exactly where this assumption is isolated). If a sync
-appears to endlessly recreate/update hosts that look correct, or `--debug`
-shows unexpected behavior, the actual CLI output may use different field
-names. Diagnose with:
+**JSON shape from `termix hosts list --json`.** Two assumptions here, both
+isolated in `src/termix_aws_sync/termix.py`:
+
+1. **Top-level shape.** The command was assumed to return a bare JSON
+   array. Real-world output has been observed instead wrapping it in an
+   object (e.g. `{"hosts": [...]}`). `fetch_termix_hosts()` already
+   tolerates this — it looks for the array under a `hosts`/`data`/`items`/
+   `results` key. If it's under some other key, or nested more than one
+   level deep, update `_extract_host_list()` in `termix.py`; you'll see a
+   clear `RuntimeError` naming the keys it tried, not a crash.
+2. **Per-host field names.** Each host object is assumed to carry `id`,
+   `name`, `ip`, `port`, `username`, `tags`, and `folder`. If a sync
+   appears to endlessly recreate/update hosts that look correct, the real
+   field names may differ.
+
+Diagnose either with:
 
 ```sh
-termix hosts list --tag aws-sync --json | jq '.[0]'
+termix hosts list --tag aws-sync --json | jq '.'
 ```
 
-and compare against the field names above. If the real output differs,
+and compare against the shape above (note whether the array is bare or
+wrapped, then check field names on one entry). If field names differ,
 update the `.get(...)` calls in `termix.fetch_termix_hosts()` (and, if
 `folder` isn't present at all, either fall back to `termix hosts get <id>`
 for folder comparison or drop folder from `sync.drifted()` and treat folder
 placement as create-only — pick one and update this section to say which).
-Running with `--debug` logs the exact `termix`/`aws` commands executed,
-which helps narrow this down.
+Running with `--debug` logs the exact `termix`/`aws` commands executed and
+their raw output, which helps narrow this down without needing shell
+access to run the diagnostic above separately.
+
+Whatever the real shape turns out to be, a wrong assumption here now fails
+as a clean logged error and the sync loop keeps running — it does not
+crash the process or crash-loop the container.
 
 **Exit 2 with a config/auth error and no traceback** on `--dry-run` (or any
 run) means the initial AWS/Termix state fetch failed outright — check

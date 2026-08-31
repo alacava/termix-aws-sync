@@ -40,15 +40,24 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 
 def run_cycle(config: Config, dry_run: bool, runner: Runner = default_runner) -> int:
-    """Run one sync cycle. Returns a process exit code (0/1/2)."""
+    """Run one sync cycle. Returns a process exit code (0/1/2). Never raises.
+
+    Fetching state depends on external CLIs whose output shape is partly
+    assumed (see termix.py's module docstring) -- catching only RuntimeError
+    here isn't enough, since a wrong assumption can raise anything (e.g.
+    AttributeError/KeyError/TypeError from unexpected JSON). Any exception
+    during fetch must become a clean, logged failure: the loop must never
+    crash and get restart-crash-looped by Docker.
+    """
     try:
         desired = fetch_instances(config, runner)
         current = fetch_termix_hosts(config, runner)
     except DuplicateInstanceError as exc:
         log.error(str(exc))
         return EXIT_CONFIG_ERROR
-    except RuntimeError as exc:
+    except Exception as exc:  # broad on purpose -- see docstring above
         log.error("failed to fetch state (check AWS/Termix auth and config): %s", exc)
+        log.debug("fetch failure traceback", exc_info=True)
         return EXIT_CONFIG_ERROR
 
     log.info(

@@ -23,6 +23,9 @@ def default_runner(cmd: List[str], parse_json: bool = False) -> Any:
         proc = subprocess.run(cmd, capture_output=True, text=True)
     except OSError as exc:
         raise RuntimeError(f"could not execute {cmd[0]!r}: {exc}") from exc
+    log.debug(
+        "exit=%d stdout=%.2000r stderr=%.500r", proc.returncode, proc.stdout, proc.stderr
+    )
     if proc.returncode != 0:
         raise RuntimeError(
             f"command failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stderr.strip()}"
