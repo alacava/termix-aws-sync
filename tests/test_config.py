@@ -25,6 +25,7 @@ profile = "lacava"
 region = "us-east-2"
 credential_id = 7
 ip_source = "external"
+default_username = "ubuntu"
 
 [[aws.targets]]
 region = "us-east-1"
@@ -80,6 +81,26 @@ def test_ip_source_resolution_global_and_per_target(tmp_path):
     assert config.ip_source == "private"
     assert by_name["savage-prod"].ip_source == "private"  # inherits global
     assert by_name["lacava"].ip_source == "public"  # per-target override
+
+
+def test_default_username_resolution_global_and_per_target(tmp_path):
+    config = load_config(write_config(tmp_path, BASE))
+    by_name = {t.label: t for t in config.targets}
+    assert config.default_username == "ec2-user"
+    assert by_name["savage-prod"].default_username == "ec2-user"  # inherits global
+    assert by_name["lacava"].default_username == "ubuntu"  # per-target override
+
+
+def test_invalid_global_default_username_rejected(tmp_path):
+    text = BASE.replace('default_username = "ec2-user"', 'default_username = ""')
+    with pytest.raises(ConfigError, match="default_username"):
+        load_config(write_config(tmp_path, text))
+
+
+def test_invalid_per_target_default_username_rejected(tmp_path):
+    text = BASE.replace('default_username = "ubuntu"', "default_username = 7")
+    with pytest.raises(ConfigError, match="default_username"):
+        load_config(write_config(tmp_path, text))
 
 
 @pytest.mark.parametrize(

@@ -120,7 +120,7 @@ def fetch_instances(
                 name=tags.get("Name", iid),
                 ip=ip,
                 port=int(tags.get("termix:port", config.default_port)),
-                username=tags.get("termix:user", config.default_username),
+                username=tags.get("termix:user", target.default_username),
                 tags=tag_list,
                 folder=target.folder,
                 credential_id=target.credential_id,

@@ -24,6 +24,7 @@ region = "us-east-1"
 # folder = "Ops/Production"     # explicit folder override beats the name-derived default
 # credential_id = 7             # per-target credential (different key pairs per account)
 # ip_source = "external"        # per-target override of the global setting
+# default_username = "ubuntu"   # per-target override of the global setting
 
 [[aws.targets]]
 name = "staging"

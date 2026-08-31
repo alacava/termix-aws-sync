@@ -125,6 +125,8 @@ region = "us-east-1"
 name = "staging"
 profile = "staging-account"
 region = "us-east-2"
+# default_username = "ubuntu"  # this account's AMIs use a different login user
+# ip_source = "external"       # and this one's reached over the public internet
 
 [[aws.targets]]
 region = "us-east-1"          # unnamed: goes to the global folder "AWS"
@@ -134,8 +136,11 @@ Folder resolution per target: explicit `folder` > `"<global folder>/<name>"`
 when `name` is set > global `[termix].folder`. If a host is later found in
 the wrong folder for its target (e.g. you renamed or moved a target), the
 sync treats that as drift and moves it with `hosts update --folder`.
-`credential_id`/`key_file` resolve the same way (per-target overrides
-global), so different environments can use different SSH credentials.
+`credential_id`/`key_file`/`ip_source`/`default_username` all resolve the
+same way (per-target overrides global), so different environments can use
+different SSH credentials, IP sources, and default login users — each
+still overridable for a single instance via its own EC2 tags
+(`termix:user`, `termix:ip`, `termix:port`).
 
 **The mounted `~/.aws` (or env-var credentials) must cover every `profile`
 named in `config.toml`** — a target whose profile isn't configured will
@@ -173,6 +178,7 @@ region = "us-east-1"
 # folder = "Ops/Production"     # explicit folder override beats the name-derived default
 # credential_id = 7
 # ip_source = "external"
+# default_username = "ubuntu"
 
 [[aws.targets]]
 name = "staging"
@@ -188,7 +194,9 @@ At least one `[[aws.targets]]` entry is required. Each target needs
 default AWS credential chain — env vars or an instance role). Every target
 must resolve an SSH auth method (`credential_id` or `key_file`, per-target
 or inherited from `[termix]`) — config load fails with a clear error
-otherwise.
+otherwise. `ip_source` and `default_username` are also resolved per-target
+(target overrides global), and both can be overridden again for a single
+instance via its EC2 tags (`termix:ip`, `termix:user`).
 
 **Env overrides** (highest precedence for the values they cover, primarily
 for Docker):

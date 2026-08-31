@@ -96,6 +96,7 @@ class Target:
     credential_id: Optional[int]
     key_file: Optional[str]
     ip_source: str  # "private" or "public"
+    default_username: str
 
     @property
     def label(self) -> str:
@@ -201,6 +202,8 @@ def load_config(cli_path: Optional[str] = None) -> Config:
         global_ip_source = normalize_ip_source(env_ip_source, where="IP_SOURCE env var")
 
     default_username = aws_table.get("default_username", DEFAULT_USERNAME)
+    if not isinstance(default_username, str) or not default_username:
+        raise ConfigError("[aws]: 'default_username' must be a non-empty string")
     default_port = aws_table.get("default_port", DEFAULT_PORT)
     if not isinstance(default_port, int) or isinstance(default_port, bool):
         raise ConfigError("[aws]: 'default_port' must be an integer")
@@ -246,6 +249,10 @@ def load_config(cli_path: Optional[str] = None) -> Config:
 
         target_ip_source = _extract_ip_source(raw, where) or global_ip_source
 
+        target_default_username = raw.get("default_username", default_username)
+        if not isinstance(target_default_username, str) or not target_default_username:
+            raise ConfigError(f"{where}: 'default_username' must be a non-empty string")
+
         targets.append(
             Target(
                 profile=profile,
@@ -255,6 +262,7 @@ def load_config(cli_path: Optional[str] = None) -> Config:
                 credential_id=credential_id,
                 key_file=key_file,
                 ip_source=target_ip_source,
+                default_username=target_default_username,
             )
         )
 

@@ -259,6 +259,36 @@ def test_per_target_credential_selection(tmp_path):
     assert result["i-lacava"].credential_id == 7  # per-target override
 
 
+def test_per_target_default_username(tmp_path):
+    text = TWO_TARGET_CONFIG.replace(
+        'credential_id = 7', 'credential_id = 7\ndefault_username = "ubuntu"'
+    )
+    config = make_config(tmp_path, text)
+    runner = FakeRunner(
+        instances_by_region={
+            "us-east-1": [instance("i-savage")],
+            "us-east-2": [instance("i-lacava")],
+        }
+    )
+    result = fetch_instances(config, runner)
+    assert result["i-savage"].username == "ec2-user"  # inherits global default
+    assert result["i-lacava"].username == "ubuntu"  # per-target override
+
+
+def test_instance_tag_overrides_per_target_default_username(tmp_path):
+    text = TWO_TARGET_CONFIG.replace(
+        'credential_id = 7', 'credential_id = 7\ndefault_username = "ubuntu"'
+    )
+    config = make_config(tmp_path, text)
+    runner = FakeRunner(
+        instances_by_region={
+            "us-east-2": [instance("i-lacava", tags={"termix:user": "admin"})],
+        }
+    )
+    result = fetch_instances(config, runner)
+    assert result["i-lacava"].username == "admin"
+
+
 def test_duplicate_instance_id_across_targets_rejected(tmp_path):
     config = make_config(tmp_path, TWO_TARGET_CONFIG)
     runner = FakeRunner(
