@@ -49,9 +49,9 @@ def test_load_valid_config(tmp_path):
 def test_folder_resolution_precedence(tmp_path):
     config = load_config(write_config(tmp_path, BASE))
     by_name = {t.label: t for t in config.targets}
-    # name-derived default
-    assert by_name["savage-prod"].folder == "AWS/savage-prod"
-    assert by_name["lacava"].folder == "AWS/lacava"
+    # name-derived default (Termix nests on the literal " / " delimiter)
+    assert by_name["savage-prod"].folder == "AWS / savage-prod"
+    assert by_name["lacava"].folder == "AWS / lacava"
     # unnamed target falls back to the global folder
     unnamed = [t for t in config.targets if t.name is None][0]
     assert unnamed.folder == "AWS"
@@ -61,11 +61,11 @@ def test_explicit_folder_beats_name_derived_default(tmp_path):
     text = BASE.replace(
         'name = "savage-prod"\nprofile = "savage"\nregion = "us-east-1"',
         'name = "savage-prod"\nprofile = "savage"\nregion = "us-east-1"\n'
-        'folder = "Savage/Production"',
+        'folder = "Savage / Production"',
     )
     config = load_config(write_config(tmp_path, text))
     by_name = {t.label: t for t in config.targets}
-    assert by_name["savage-prod"].folder == "Savage/Production"
+    assert by_name["savage-prod"].folder == "Savage / Production"
 
 
 def test_credential_id_resolution_per_target_overrides_global(tmp_path):

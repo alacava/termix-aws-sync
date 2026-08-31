@@ -361,8 +361,8 @@ def test_two_targets_sync_into_two_distinct_folders(tmp_path):
         }
     )
     result = fetch_instances(config, runner)
-    assert result["i-savage"].folder == "AWS/savage-prod"
-    assert result["i-lacava"].folder == "AWS/lacava"
+    assert result["i-savage"].folder == "AWS / savage-prod"
+    assert result["i-lacava"].folder == "AWS / lacava"
 
 
 def test_per_target_credential_selection(tmp_path):

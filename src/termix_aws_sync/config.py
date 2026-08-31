@@ -231,7 +231,12 @@ def load_config(cli_path: Optional[str] = None) -> Config:
             if not isinstance(folder, str) or not folder:
                 raise ConfigError(f"{where}: 'folder' must be a non-empty string")
         elif name:
-            folder = f"{global_folder}/{name}"
+            # Termix nests folders by splitting on the literal " / " (with
+            # spaces) -- confirmed in its own source
+            # (src/ui/sidebar/build-host-tree.ts). A bare "/" with no
+            # spaces is stored as one flat folder whose name contains a
+            # slash character, not a nested subfolder.
+            folder = f"{global_folder} / {name}"
         else:
             folder = global_folder
 

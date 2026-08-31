@@ -130,7 +130,7 @@ accounts), so an instance is never duplicated across environments.
 
 ```toml
 [termix]
-folder = "AWS"               # root folder; per-target default is "AWS/<name>"
+folder = "AWS"               # root folder; per-target default is "AWS / <name>"
 managed_tag = "aws-sync"
 extra_tags = ["aws"]
 credential_id = 3             # global default SSH credential
@@ -141,7 +141,7 @@ default_username = "ec2-user"
 default_port = 22
 
 [[aws.targets]]
-name = "production"           # -> folder "AWS/production", tagged "production"
+name = "production"           # -> folder "AWS / production", tagged "production"
 profile = "prod-account"
 region = "us-east-1"
 # credential_id = 7           # different key pair for this account
@@ -157,10 +157,13 @@ region = "us-east-2"
 region = "us-east-1"          # unnamed: goes to the global folder "AWS"
 ```
 
-Folder resolution per target: explicit `folder` > `"<global folder>/<name>"`
-when `name` is set > global `[termix].folder`. If a host is later found in
-the wrong folder for its target (e.g. you renamed or moved a target), the
-sync treats that as drift and moves it with `hosts update --folder`.
+Folder resolution per target: explicit `folder` > `"<global folder> / <name>"`
+when `name` is set > global `[termix].folder`. Termix nests folders by
+splitting on the literal `" / "` (with spaces) — a bare `/` with no spaces
+is stored as one flat folder whose name contains a slash character, not a
+nested subfolder, so keep that delimiter in any explicit `folder` override
+too. If a host is later found in the wrong folder for its target (e.g. you
+renamed or moved a target), the sync treats that as drift and moves it.
 `credential_id`/`key_file`/`ip_source`/`default_username` all resolve the
 same way (per-target overrides global), so different environments can use
 different SSH credentials, IP sources, and default login users — each
@@ -184,7 +187,7 @@ Config is TOML. Search order: `--config PATH`, then
 ```toml
 [termix]
 # api key comes from TERMIX_API_KEY env, never from this file
-folder = "AWS"               # root folder; per-target default is "AWS/<name>"
+folder = "AWS"               # root folder; per-target default is "AWS / <name>"
 managed_tag = "aws-sync"
 extra_tags = ["aws"]
 credential_id = 3            # global default; overridable per target
@@ -200,7 +203,7 @@ default_port = 22
 name = "production"
 profile = "prod-account"
 region = "us-east-1"
-# folder = "Ops/Production"     # explicit folder override beats the name-derived default
+# folder = "Ops / Production"   # explicit folder override beats the name-derived default
 # credential_id = 7
 # ip_source = "external"
 # default_username = "ubuntu"

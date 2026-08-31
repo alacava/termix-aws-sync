@@ -5,7 +5,7 @@
 
 [termix]
 # api key comes from TERMIX_API_KEY env, never from this file
-folder = "AWS"               # root folder; per-target default is "AWS/<name>"
+folder = "AWS"               # root folder; per-target default is "AWS / <name>"
 managed_tag = "aws-sync"
 extra_tags = ["aws"]
 credential_id = 3            # global default; overridable per target
@@ -18,10 +18,10 @@ default_port = 22
 # required_tag = { key = "termix", value = "true" }
 
 [[aws.targets]]
-name = "production"             # environment name: default folder "AWS/production", applied as tag
+name = "production"             # environment name: default folder "AWS / production", applied as tag
 profile = "prod-account"
 region = "us-east-1"
-# folder = "Ops/Production"     # explicit folder override beats the name-derived default
+# folder = "Ops / Production"   # explicit folder override beats the name-derived default
 # credential_id = 7             # per-target credential (different key pairs per account)
 # ip_source = "external"        # per-target override of the global setting
 # default_username = "ubuntu"   # per-target override of the global setting
