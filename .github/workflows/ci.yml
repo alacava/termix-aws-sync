@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: lint + test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: pytest
+        run: pytest -q
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t termix-aws-sync:ci .
+
+      - name: Verify bundled CLI versions
+        # The image's ENTRYPOINT is dedicated to termix-aws-sync itself (see
+        # docker/entrypoint.sh), so aws/termix are checked via --entrypoint.
+        run: |
+          docker run --rm --entrypoint aws termix-aws-sync:ci --version
+          docker run --rm --entrypoint termix termix-aws-sync:ci --version
+          docker run --rm termix-aws-sync:ci --version

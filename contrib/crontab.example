@@ -1,0 +1,9 @@
+# Example crontab entry for termix-aws-sync, run every 15 minutes.
+#
+# Install with: crontab -e   (as the user that should own the credentials)
+#
+# Secrets are kept out of the crontab line itself: source them from an env
+# file readable only by this user (root-only, mode 0600 is recommended --
+# see README.md for setup).
+
+*/15 * * * * . /etc/termix-aws-sync.env && /usr/local/bin/termix-aws-sync >> /var/log/termix-aws-sync.log 2>&1

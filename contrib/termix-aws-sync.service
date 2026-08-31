@@ -1,0 +1,10 @@
+[Unit]
+Description=termix-aws-sync: one-shot sync of EC2 instances into Termix
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/termix-aws-sync.env
+ExecStart=/usr/local/bin/termix-aws-sync
+# journald captures stdout/stderr; view with: journalctl -u termix-aws-sync
