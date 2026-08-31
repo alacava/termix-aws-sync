@@ -344,9 +344,16 @@ docker build -t termix-aws-sync .
 Pushing a tag matching `v*.*.*` (e.g. `v0.1.0`) runs the full CI suite and,
 if it passes, builds and pushes a `linux/amd64` image to Docker Hub as
 `antlac1/termix-aws-sync:<version>`, `:<major.minor>`, and `:latest` — see
-`.github/workflows/ci.yml`'s `publish` job. This requires a repo secret
-`DOCKERHUB_TOKEN` (a Docker Hub access token — Account Settings -> Security
--> Access Tokens — not the account password).
+`.github/workflows/ci.yml`'s `publish` job. This job only runs on a tag
+push (`github.ref` starting with `refs/tags/v`) — it shows as skipped on
+ordinary branch pushes and PRs, by design.
+
+It requires two repo secrets (Settings -> Secrets and variables ->
+Actions):
+
+- `DOCKERHUB_USERNAME` — your Docker Hub username.
+- `DOCKERHUB_TOKEN` — a Docker Hub access token (Account Settings ->
+  Security -> Access Tokens), not the account password.
 
 ## License
 
