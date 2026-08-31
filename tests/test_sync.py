@@ -272,6 +272,27 @@ def test_apply_plan_issues_exactly_create_update_delete():
     assert client.calls[2][1] == 202
 
 
+def test_create_and_update_bodies_always_enable_ssh():
+    # Regression: enableSsh does not default to true from connectionType
+    # "ssh" server-side (confirmed live) -- hosts created without it
+    # explicitly set had SSH disabled entirely.
+    d_create = {"i-1": desired("i-1")}
+    client = FakeTermixClient()
+    apply_plan(build_plan(d_create, {}), d_create, {}, client)
+
+    create_body = next(body for action, body in client.calls if action == "create")
+    assert create_body["enableSsh"] is True
+    assert create_body["connectionType"] == "ssh"
+
+    d_update = {"i-1": desired("i-1", ip="10.0.0.99")}
+    c = {"i-1": current("i-1", 101, raw={"id": 101})}
+    apply_plan(build_plan(d_update, c), d_update, c, client)
+
+    _, update_body = next(payload for action, payload in client.calls if action == "update")
+    assert update_body["enableSsh"] is True
+    assert update_body["connectionType"] == "ssh"
+
+
 def test_update_host_merges_diff_onto_existing_record_not_a_replace():
     # PUT is a confirmed full replace against the real API: update_host
     # must merge onto the host's full existing record (TermixHost.raw),

@@ -23,6 +23,12 @@ merge -- a field omitted from the request body reverts to its default
 didn't repeat it). `update_host()` therefore merges the diff onto the
 host's full existing record (`TermixHost.raw`, captured at list time)
 rather than PUTting a diff alone.
+
+One more field confirmed live the hard way: `enableSsh` does NOT default
+to true from `connectionType: "ssh"` -- it's read straight off the request
+body with no fallback, so hosts created without it explicitly set had SSH
+disabled entirely despite everything else being correct. `_host_body()`
+always sends it now.
 """
 
 from __future__ import annotations
@@ -124,6 +130,12 @@ def _host_body(spec: DesiredHost) -> Dict[str, Any]:
         "username": spec.username,
         "folder": spec.folder,
         "tags": list(spec.tags),
+        # connectionType defaults to "ssh" server-side when omitted, but
+        # enableSsh does NOT default from it (confirmed in Termix's source:
+        # it's read straight off the request body with no connectionType
+        # fallback) -- omitting it silently created hosts with SSH disabled.
+        "connectionType": "ssh",
+        "enableSsh": True,
         "enableTerminal": True,
     }
     body.update(_auth_fields(spec))
