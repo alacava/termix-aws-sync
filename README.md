@@ -116,14 +116,14 @@ default_username = "ec2-user"
 default_port = 22
 
 [[aws.targets]]
-name = "savage-prod"          # -> folder "AWS/savage-prod", tagged "savage-prod"
-profile = "savage"
+name = "production"           # -> folder "AWS/production", tagged "production"
+profile = "prod-account"
 region = "us-east-1"
 # credential_id = 7           # different key pair for this account
 
 [[aws.targets]]
-name = "lacava"
-profile = "lacava"
+name = "staging"
+profile = "staging-account"
 region = "us-east-2"
 
 [[aws.targets]]
@@ -158,7 +158,7 @@ folder = "AWS"               # root folder; per-target default is "AWS/<name>"
 managed_tag = "aws-sync"
 extra_tags = ["aws"]
 credential_id = 3            # global default; overridable per target
-# key_file = "/home/anthony/.ssh/aws-fleet.pem"
+# key_file = "/home/app/.ssh/aws-fleet.pem"
 
 [aws]
 ip_source = "internal"          # "internal"/"private" or "external"/"public" (global default)
@@ -167,16 +167,16 @@ default_port = 22
 # required_tag = { key = "termix", value = "true" }
 
 [[aws.targets]]
-name = "savage-prod"
-profile = "savage"
+name = "production"
+profile = "prod-account"
 region = "us-east-1"
-# folder = "Savage/Production"  # explicit folder override beats the name-derived default
+# folder = "Ops/Production"     # explicit folder override beats the name-derived default
 # credential_id = 7
 # ip_source = "external"
 
 [[aws.targets]]
-name = "lacava"
-profile = "lacava"
+name = "staging"
+profile = "staging-account"
 region = "us-east-2"
 
 [[aws.targets]]
