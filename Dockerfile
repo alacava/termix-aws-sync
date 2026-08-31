@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 ARG AWSCLI_VERSION=2.17.62
 ARG NODE_MAJOR=20
