@@ -1,0 +1,21 @@
+BUILD_BRIEF.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Local, user-specific runtime config (never commit real secrets/config)
+config.toml
+.env
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

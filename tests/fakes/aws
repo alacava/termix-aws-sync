@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Fake `aws` CLI for the end-to-end test.
+
+Understands just enough of `aws ec2 describe-instances ... --output json`
+to return a canned instance list. Ignores --profile/--region since the e2e
+test only uses one target.
+"""
+import json
+import sys
+
+INSTANCES = [
+    {
+        "InstanceId": "i-0000000000000aaa1",
+        "State": {"Name": "running"},
+        "PrivateIpAddress": "10.0.0.50",
+        "Tags": [{"Key": "Name", "Value": "existing-drifted"}],
+    },
+    {
+        "InstanceId": "i-0000000000000ccc3",
+        "State": {"Name": "running"},
+        "PrivateIpAddress": "10.0.0.60",
+        "Tags": [{"Key": "Name", "Value": "brand-new"}],
+    },
+]
+
+if __name__ == "__main__":
+    if "describe-instances" in sys.argv:
+        print(json.dumps(INSTANCES))
+        sys.exit(0)
+    print(f"unsupported invocation: {sys.argv}", file=sys.stderr)
+    sys.exit(1)

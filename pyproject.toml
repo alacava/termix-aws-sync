@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "termix-aws-sync"
+version = "0.1.0"
+description = "One-way sync of running EC2 instances into Termix host inventory"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Anthony LaCava" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    # tomllib is stdlib on 3.11+; tomli is its backport for 3.9/3.10.
+    # This is the one deliberate exception to "stdlib only at runtime" --
+    # see src/termix_aws_sync/config.py's module docstring.
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+termix-aws-sync = "termix_aws_sync.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["UP006", "UP007", "UP035", "UP045"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
