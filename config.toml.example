@@ -1,0 +1,34 @@
+# Copy this file to config.toml (git-ignored) and edit for your environment.
+#   cp config.toml.example config.toml
+#
+# Full reference: README.md#configuration-reference
+
+[termix]
+# api key comes from TERMIX_API_KEY env, never from this file
+folder = "AWS"               # root folder; per-target default is "AWS/<name>"
+managed_tag = "aws-sync"
+extra_tags = ["aws"]
+credential_id = 3            # global default; overridable per target
+# key_file = "/home/anthony/.ssh/aws-fleet.pem"
+
+[aws]
+ip_source = "internal"          # "internal"/"private" or "external"/"public" (global default)
+default_username = "ec2-user"
+default_port = 22
+# required_tag = { key = "termix", value = "true" }
+
+[[aws.targets]]
+name = "savage-prod"            # environment name: default folder "AWS/savage-prod", applied as tag
+profile = "savage"
+region = "us-east-1"
+# folder = "Savage/Production"  # explicit folder override beats the name-derived default
+# credential_id = 7             # per-target credential (different key pairs per account)
+# ip_source = "external"        # per-target override of the global setting
+
+[[aws.targets]]
+name = "lacava"
+profile = "lacava"
+region = "us-east-2"
+
+[[aws.targets]]
+region = "us-east-1"            # unnamed target: goes to the global folder, tagged with profile/region only

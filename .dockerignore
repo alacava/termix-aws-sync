@@ -1,0 +1,16 @@
+.git
+.github
+tests
+contrib
+BUILD_BRIEF.md
+*.md
+!README.md
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+config.toml
+.env

@@ -1,0 +1,10 @@
+services:
+  sync:
+    build: .
+    # image: ghcr.io/<owner>/termix-aws-sync:latest   # once published
+    restart: unless-stopped
+    env_file: .env   # TERMIX_API_KEY, SYNC_INTERVAL, optional IP_SOURCE/TERMIX_URL
+    volumes:
+      - ./config.toml:/etc/termix-aws-sync.toml:ro
+      - ~/.aws:/home/app/.aws:ro          # profiles + credentials, read-only
+      # - ~/.ssh/aws-fleet.pem:/keys/aws-fleet.pem:ro   # only if key_file auth is used
