@@ -15,7 +15,7 @@ AWS is always the source of truth. Termix is never read to modify AWS.
 ```sh
 git clone <this repo>
 cd termix-aws-sync
-cp .env.example .env        # edit: set TERMIX_API_KEY, adjust SYNC_INTERVAL
+cp .env.example .env        # edit: set TERMIX_API_KEY + TERMIX_URL, adjust SYNC_INTERVAL
 cp config.toml.example config.toml   # or write your own, see "Configuration" below
 $EDITOR config.toml          # set your AWS profile(s)/region(s), folder, credential_id
 docker compose up -d
@@ -40,8 +40,9 @@ on every version tag. To use one instead of building locally, swap
 
 ## Bare-metal install
 
-Requires Python 3.9+, [awscli v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html),
-and the [termix CLI](https://docs.termix.site/cli/) (`npm install -g @termix-cli/cli`, Node 20.11+).
+Requires Python 3.9+ and [awscli v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+Termix is accessed via its REST API directly (see "A note on the Termix
+CLI vs. API" below) — no separate Termix CLI/Node.js install needed.
 
 ```sh
 pipx install .
@@ -53,10 +54,9 @@ termix-aws-sync --dry-run
 
 - **awscli v2** on `PATH` (`aws --version`), configured with a profile (or
   instance role / env-var credentials) for every AWS account you sync.
-- **termix CLI** on `PATH` (`termix --version`), Node 20.11+. Either run
-  `termix login` once, or set `TERMIX_API_KEY` for non-interactive use
-  (recommended for cron/systemd/Docker).
-- A **Termix API key** (`TERMIX_API_KEY`) — never put this in `config.toml`.
+- A **Termix API key** (`TERMIX_API_KEY`) and your Termix server's base URL
+  (`TERMIX_URL`, e.g. `http://termix.example.com:8080`) — both required,
+  never put the key in `config.toml`.
 - IAM permission for **`ec2:DescribeInstances` only** — this tool never
   calls anything else against AWS. Minimal policy:
 
@@ -72,6 +72,25 @@ termix-aws-sync --dry-run
     ]
   }
   ```
+
+## A note on the Termix CLI vs. API
+
+Earlier versions of this tool drove Termix through its official CLI
+(`@termix-cli/cli`), and AWS is still accessed the same way today (via
+`aws ec2 describe-instances`). Termix itself was switched to its REST API
+directly after finding a reproducible bug: `termix hosts create/update
+--credential-id` fails server-side (`HTTP 500`, a Postgres `NOT NULL`
+violation on `auth_type`), because the CLI doesn't send an explicit
+`authType` field the server actually requires — confirmed by reading
+Termix's own (open source) server code. Calling the API directly and
+always sending `authType` explicitly is the fix, and was confirmed against
+a live server before this switch was made. This is a deliberate,
+evidence-based exception to "prefer official, versioned/documented
+interfaces over undocumented ones" — not a default to reach for casually.
+
+Practical implications: `TERMIX_URL` is now required (there's no
+CLI-configured server to fall back on), and there's no Node.js/`termix`
+CLI to install anywhere — one less runtime dependency.
 
 ## Internal vs. external IP
 
@@ -200,14 +219,13 @@ At least one `[[aws.targets]]` entry is required. Each target needs
 default AWS credential chain — env vars or an instance role). Every target
 must resolve an SSH auth method (`credential_id` or `key_file`, per-target
 or inherited from `[termix]`) — config load fails with a clear error
-otherwise. This is a hard requirement of the `termix` CLI itself
-(confirmed against a real server: `hosts create` rejects the call outright
-with "needs an auth method: pass --password, --key-file or
---credential-id" if neither is given) — there is no folder-level
-credential fallback, so it's caught here at config load rather than
-failing on every single host, every cycle, forever. `ip_source` and
-`default_username` are also resolved per-target (target overrides global),
-and both can be overridden again for a single instance via its EC2 tags
+otherwise. This is a hard requirement of Termix itself: its host create/
+update endpoints reject the call outright without an explicit auth method
+(confirmed against a real server — and there is no folder-level credential
+fallback), so it's caught here at config load rather than failing on every
+single host, every cycle, forever. `ip_source` and `default_username` are
+also resolved per-target (target overrides global), and both can be
+overridden again for a single instance via its EC2 tags
 (`termix:ip`, `termix:user`).
 
 If you want every host in one environment to share a single credential
@@ -221,7 +239,7 @@ for Docker):
 | Variable | Purpose |
 |---|---|
 | `TERMIX_API_KEY` | **Required.** Termix auth. Never put this in the TOML file. |
-| `TERMIX_URL` | Termix server URL, if the `termix` CLI isn't already configured with one. |
+| `TERMIX_URL` | **Required.** Base URL of your Termix server, e.g. `http://termix.example.com:8080`. |
 | `SYNC_INTERVAL` | Loop-mode interval in seconds (same as `--interval`). Ignored by `--dry-run`. |
 | `IP_SOURCE` | Overrides the global `[aws].ip_source`. Per-target/per-instance settings still take precedence over it. |
 | `TERMIX_AWS_SYNC_CONFIG` | Config file path (second in the search order, after `--config`). |
@@ -255,8 +273,8 @@ termix-aws-sync [--config PATH] [--dry-run] [--debug] [--version] [--interval SE
   repeat. `SIGTERM`/`SIGINT` finish or abort the current sleep and exit 0.
   A failed cycle is logged and the loop continues; it never crash-loops.
   Omitting both (the default) is one-shot mode, for cron/systemd.
-- `--debug`: verbose logging, including raw `termix hosts list --json`
-  output — see Troubleshooting below.
+- `--debug`: verbose logging, including every AWS CLI command run and
+  every Termix API request/response — see Troubleshooting below.
 - Exit codes: `0` in sync or applied cleanly, `1` one or more operations
   failed (partial apply), `2` config/auth error (nothing was attempted, or
   the initial AWS/Termix state couldn't even be fetched).
@@ -265,7 +283,7 @@ termix-aws-sync [--config PATH] [--dry-run] [--debug] [--version] [--interval SE
 
 ```sh
 sudo install -o root -g root -m 0600 /dev/null /etc/termix-aws-sync.env
-sudo $EDITOR /etc/termix-aws-sync.env    # TERMIX_API_KEY=...
+sudo $EDITOR /etc/termix-aws-sync.env    # TERMIX_API_KEY=... and TERMIX_URL=...
 crontab -e                               # see contrib/crontab.example
 ```
 
@@ -286,19 +304,25 @@ journalctl -u termix-aws-sync -f
   a tag `aws-id-<instance-id>`, and the diff keys on that — not IP or name —
   so IP changes and renames are handled as updates, not create+delete.
 - **Managed-tag marker.** Every host this tool creates also gets a
-  `aws-sync` tag (configurable via `managed_tag`). The tool only ever
-  lists, updates, or deletes hosts carrying that tag — every Termix `hosts
-  list` call is itself filtered `--tag <managed_tag>`. Hand-created Termix
-  hosts are never touched, even on IP collision.
+  `aws-sync` tag (configurable via `managed_tag`). The Termix API has no
+  server-side tag filter, so this tool fetches every host visible to the
+  API key and filters to the managed tag itself before touching anything
+  — hosts without it are never listed, updated, or deleted. Hand-created
+  Termix hosts are never touched, even on IP collision.
 - **Deletes only fire when a managed host's instance ID is no longer in the
   set of running instances** — not on any other kind of drift.
-- **Secrets never appear in argv** beyond what the `termix` CLI itself
-  requires. `TERMIX_API_KEY` is an env var read by the CLI, never a
-  command-line argument. `--credential-id` (a saved Termix credential,
-  referenced by ID) is the recommended SSH auth path for exactly this
-  reason — prefer it over `--key-file` when possible, since a key file path
-  is a filesystem reference, not a secret in argv, but still avoids ever
-  putting key *material* on the command line.
+- **Updates merge, they don't replace.** Termix's update endpoint is a
+  full replace (confirmed directly against a live server), so a naive
+  partial update would silently reset anything you configured by hand in
+  the Termix UI after a managed host was created. This tool always merges
+  the diff onto the host's existing full record first.
+- **Secrets never appear in argv/URLs** beyond what's required.
+  `TERMIX_API_KEY` is sent only as an `Authorization: Bearer` header, never
+  as a URL parameter or CLI argument. `credential_id` (a saved Termix
+  credential, referenced by ID) is the recommended SSH auth path for
+  exactly this reason — prefer it over `key_file` when possible, since a
+  key file path is just a filesystem reference, but it still avoids ever
+  putting key *material* in this tool's own config or logs.
 
 ## ASG churn / opt-in tag
 
@@ -315,46 +339,39 @@ all; everything else is ignored by both the create and delete paths.
 only manages hosts it tagged itself; a hand-created host with the managed
 tag but no identity tag is skipped and logged, by design.
 
-**JSON shape from `termix hosts list --json`.** Two assumptions here, both
-isolated in `src/termix_aws_sync/termix.py`:
-
-1. **Top-level shape.** The command was assumed to return a bare JSON
-   array. Real-world output has been observed instead wrapping it in an
-   object (e.g. `{"hosts": [...]}`). `fetch_termix_hosts()` already
-   tolerates this — it looks for the array under a `hosts`/`data`/`items`/
-   `results` key. If it's under some other key, or nested more than one
-   level deep, update `_extract_host_list()` in `termix.py`; you'll see a
-   clear `RuntimeError` naming the keys it tried, not a crash.
-2. **Per-host field names.** Each host object is assumed to carry `id`,
-   `name`, `ip`, `port`, `username`, `tags`, and `folder`. If a sync
-   appears to endlessly recreate/update hosts that look correct, the real
-   field names may differ.
-
-Diagnose either with:
+**`termix API GET/POST/PUT/DELETE ... failed (401)`.** `TERMIX_API_KEY` is
+wrong, expired, or missing the `Authorization: Bearer` prefix expectations
+on the server side — verify with a direct call:
 
 ```sh
-termix hosts list --tag aws-sync --json | jq '.'
+curl -i -H "Authorization: Bearer $TERMIX_API_KEY" "$TERMIX_URL/host/db/host"
 ```
 
-and compare against the shape above (note whether the array is bare or
-wrapped, then check field names on one entry). If field names differ,
-update the `.get(...)` calls in `termix.fetch_termix_hosts()` (and, if
-`folder` isn't present at all, either fall back to `termix hosts get <id>`
-for folder comparison or drop folder from `sync.drifted()` and treat folder
-placement as create-only — pick one and update this section to say which).
-Running with `--debug` logs the exact `termix`/`aws` commands executed and
-their raw output, which helps narrow this down without needing shell
-access to run the diagnostic above separately.
+A `200` with a JSON array back confirms the key and URL are both good.
 
-Whatever the real shape turns out to be, a wrong assumption here now fails
-as a clean logged error and the sync loop keeps running — it does not
-crash the process or crash-loop the container.
+**`could not reach termix API at ...`** means `TERMIX_URL` itself is wrong,
+or the server isn't reachable from wherever this tool is running (check
+Docker networking — `localhost` inside a container is the container
+itself, not your host; see the internal-vs-external IP guidance above for
+the same class of gotcha).
+
+**Field-shape assumptions.** `fetch_termix_hosts()` in
+`src/termix_aws_sync/termix.py` assumes each host object carries `id`,
+`name`, `ip`, `port`, `username`, `tags`, and `folder` — confirmed against
+a real server's `GET /host/db/host` response, but Termix could change this
+in a future release. Running with `--debug` logs the raw HTTP request/
+response for every call, which is the fastest way to compare against
+reality if a sync starts behaving oddly (e.g. endlessly recreating or
+updating hosts that look correct). Whatever the real shape turns out to
+be, a wrong assumption here fails as a clean logged error and the sync
+loop keeps running — it does not crash the process or crash-loop the
+container.
 
 **Exit 2 with a config/auth error and no traceback** on `--dry-run` (or any
 run) means the initial AWS/Termix state fetch failed outright — check
-`TERMIX_API_KEY`, that `aws`/`termix` are on `PATH` and authenticated, and
-that AWS profiles named in `config.toml` exist. `termix whoami` is a good
-standalone auth smoke test.
+`TERMIX_API_KEY`, `TERMIX_URL`, that `aws` is on `PATH` and authenticated,
+and that AWS profiles named in `config.toml` exist. The curl command above
+is a good standalone Termix auth smoke test.
 
 ## Development
 

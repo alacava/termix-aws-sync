@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from .aws import DesiredHost
-from .runner import Runner, default_runner
+from .http_client import TermixClient
 from .termix import TermixHost, create_host, delete_host, update_host
 
 log = logging.getLogger("termix-aws-sync")
@@ -69,25 +69,25 @@ def apply_plan(
     plan: Plan,
     desired: Dict[str, DesiredHost],
     current: Dict[str, TermixHost],
-    runner: Runner = default_runner,
+    client: TermixClient,
 ) -> int:
     """Execute the plan. Returns the number of failed operations."""
     failures = 0
     for iid in plan.create:
         try:
-            create_host(desired[iid], runner)
+            create_host(desired[iid], client)
         except Exception as e:  # broad on purpose: one bad host must not abort the rest
             failures += 1
             log.error("create failed for %s: %s", iid, e)
     for iid in plan.update:
         try:
-            update_host(current[iid].id, desired[iid], runner)
+            update_host(current[iid], desired[iid], client)
         except Exception as e:  # broad on purpose: one bad host must not abort the rest
             failures += 1
             log.error("update failed for %s: %s", iid, e)
     for iid in plan.delete:
         try:
-            delete_host(current[iid], runner)
+            delete_host(current[iid], client)
         except Exception as e:  # broad on purpose: one bad host must not abort the rest
             failures += 1
             log.error("delete failed for %s: %s", iid, e)

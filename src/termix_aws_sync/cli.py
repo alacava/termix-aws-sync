@@ -13,6 +13,7 @@ from typing import List, Optional
 from . import __version__
 from .aws import DuplicateInstanceError, fetch_instances
 from .config import Config, ConfigError, load_config
+from .http_client import HttpTermixClient, TermixClient
 from .runner import Runner, default_runner
 from .sync import apply_plan, build_plan, log_plan
 from .termix import fetch_termix_hosts
@@ -39,19 +40,26 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run_cycle(config: Config, dry_run: bool, runner: Runner = default_runner) -> int:
+def run_cycle(
+    config: Config,
+    dry_run: bool,
+    runner: Runner = default_runner,
+    client: Optional[TermixClient] = None,
+) -> int:
     """Run one sync cycle. Returns a process exit code (0/1/2). Never raises.
 
-    Fetching state depends on external CLIs whose output shape is partly
-    assumed (see termix.py's module docstring) -- catching only RuntimeError
-    here isn't enough, since a wrong assumption can raise anything (e.g.
-    AttributeError/KeyError/TypeError from unexpected JSON). Any exception
-    during fetch must become a clean, logged failure: the loop must never
-    crash and get restart-crash-looped by Docker.
+    Fetching state depends on the AWS CLI and the Termix REST API, whose
+    responses are partly a matter of assumption (see termix.py's module
+    docstring) -- catching only RuntimeError here isn't enough, since a
+    wrong assumption can raise anything (e.g. AttributeError/KeyError/
+    TypeError from unexpected JSON). Any exception during fetch must
+    become a clean, logged failure: the loop must never crash and get
+    restart-crash-looped by Docker.
     """
+    client = client or HttpTermixClient(config.termix_url, config.termix_api_key)
     try:
         desired = fetch_instances(config, runner)
-        current = fetch_termix_hosts(config, runner)
+        current = fetch_termix_hosts(config, client)
     except DuplicateInstanceError as exc:
         log.error(str(exc))
         return EXIT_CONFIG_ERROR
@@ -75,7 +83,7 @@ def run_cycle(config: Config, dry_run: bool, runner: Runner = default_runner) ->
     if dry_run:
         return EXIT_OK
 
-    failures = apply_plan(plan, desired, current, runner)
+    failures = apply_plan(plan, desired, current, client)
     if failures:
         log.error("%d operation(s) failed", failures)
         return EXIT_OPERATION_FAILURE
@@ -124,6 +132,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not config.termix_api_key:
         log.error("TERMIX_API_KEY environment variable is required")
+        return EXIT_CONFIG_ERROR
+
+    if not config.termix_url:
+        log.error(
+            "TERMIX_URL environment variable is required (e.g. http://termix.example.com:8080) "
+            "-- Termix is now accessed via its REST API directly, with no CLI-configured "
+            "server to fall back on"
+        )
         return EXIT_CONFIG_ERROR
 
     if not interval:

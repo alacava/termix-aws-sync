@@ -62,11 +62,10 @@ def instance(iid, private_ip="10.0.0.1", public_ip=None, tags=None, state="runni
 
 
 class FakeRunner:
-    """Routes calls to canned AWS/Termix responses by target region."""
+    """Routes calls to canned AWS responses by target region."""
 
-    def __init__(self, instances_by_region=None, hosts=None):
+    def __init__(self, instances_by_region=None):
         self.instances_by_region = instances_by_region or {}
-        self.hosts = hosts if hosts is not None else []
         self.calls = []
 
     def __call__(self, cmd, parse_json=False):
@@ -74,9 +73,60 @@ class FakeRunner:
         if "describe-instances" in cmd:
             region = cmd[cmd.index("--region") + 1]
             return self.instances_by_region.get(region, [])
-        if "list" in cmd:
-            return self.hosts
         return ""
+
+
+class FakeListOnlyClient:
+    """Returns a fixed `list_hosts()` payload -- for exercising
+    fetch_termix_hosts's own per-host handling directly."""
+
+    def __init__(self, hosts):
+        self._hosts = hosts
+
+    def list_hosts(self):
+        return self._hosts
+
+
+class FakeTermixClient:
+    """In-memory fake matching the real API's confirmed semantics: PUT is a
+    full replace, not a merge (see termix.py's module docstring)."""
+
+    def __init__(self, hosts=None):
+        self._next_id = 1000
+        self.hosts = {}
+        for h in hosts or []:
+            hid = h.get("id")
+            if hid is None:
+                hid = self._alloc_id()
+            self.hosts[hid] = dict(h)
+        self.calls = []
+
+    def _alloc_id(self):
+        self._next_id += 1
+        return self._next_id
+
+    def list_hosts(self):
+        self.calls.append(("list", None))
+        return list(self.hosts.values())
+
+    def create_host(self, body):
+        hid = self._alloc_id()
+        record = dict(body)
+        record["id"] = hid
+        self.hosts[hid] = record
+        self.calls.append(("create", body))
+        return record
+
+    def update_host(self, host_id, body):
+        record = dict(body)  # full replace, matching the real API
+        record["id"] = host_id
+        self.hosts[host_id] = record
+        self.calls.append(("update", (host_id, body)))
+        return record
+
+    def delete_host(self, host_id):
+        self.hosts.pop(host_id, None)
+        self.calls.append(("delete", host_id))
 
 
 SINGLE_TARGET_CONFIG = """
@@ -151,52 +201,35 @@ def test_no_op():
 
 
 def test_host_with_managed_tag_but_no_aws_id_tag_is_warned_and_skipped(caplog):
-    runner = FakeRunner(hosts=[{"id": 999, "name": "manual-host", "tags": ["aws-sync"]}])
+    client = FakeListOnlyClient([{"id": 999, "name": "manual-host", "tags": ["aws-sync"]}])
     config = _single_target_config()
     with caplog.at_level("WARNING"):
-        managed = fetch_termix_hosts(config, runner)
+        managed = fetch_termix_hosts(config, client)
     assert managed == {}
     assert "no aws-id-* tag" in caplog.text
 
 
-def test_managed_tag_filter_is_passed_to_termix_list(tmp_path):
+def test_unmanaged_hosts_without_managed_tag_are_ignored(tmp_path):
+    # The API has no server-side tag filter (confirmed against a live
+    # server): GET /host/db/host returns every host, so filtering by
+    # managed_tag must happen here -- this is what keeps hand-created
+    # hosts untouched.
     config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
-    runner = FakeRunner(hosts=[])
-    fetch_termix_hosts(config, runner)
-    [call] = runner.calls
-    assert "--tag" in call
-    assert call[call.index("--tag") + 1] == "aws-sync"
-
-
-def test_fetch_termix_hosts_unwraps_dict_response(tmp_path):
-    # Regression: real-world `termix hosts list --json` output has been
-    # observed wrapping the array in an object rather than returning it
-    # bare, e.g. {"hosts": [...]}. Iterating a dict yields its string keys,
-    # which used to crash with AttributeError deep inside the per-host loop.
-    config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
-    payload = {
-        "hosts": [
-            {"id": 101, "name": "existing", "tags": ["aws-sync", "aws-id-i-1"]},
+    client = FakeListOnlyClient(
+        [
+            {"id": 1, "name": "hand-created", "tags": ["some-other-tag"]},
+            {"id": 2, "name": "managed", "tags": ["aws-sync", "aws-id-i-1"]},
         ]
-    }
-    runner = FakeRunner(hosts=payload)
-    managed = fetch_termix_hosts(config, runner)
+    )
+    managed = fetch_termix_hosts(config, client)
     assert list(managed) == ["i-1"]
-    assert managed["i-1"].id == 101
-
-
-def test_fetch_termix_hosts_rejects_unrecognized_dict_shape(tmp_path):
-    config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
-    runner = FakeRunner(hosts={"unexpected_key": []})
-    with pytest.raises(RuntimeError, match="no recognized list field"):
-        fetch_termix_hosts(config, runner)
 
 
 def test_fetch_termix_hosts_skips_non_dict_entries(tmp_path, caplog):
     config = make_config(tmp_path, SINGLE_TARGET_CONFIG)
-    runner = FakeRunner(hosts=["not-a-host-object"])
+    client = FakeListOnlyClient(["not-a-host-object"])
     with caplog.at_level("WARNING"):
-        managed = fetch_termix_hosts(config, runner)
+        managed = fetch_termix_hosts(config, client)
     assert managed == {}
     assert "unexpected non-object entry" in caplog.text
 
@@ -211,7 +244,7 @@ def _single_target_config():
         return load_config(str(path))
 
 
-def test_apply_plan_issues_exactly_create_update_delete(monkeypatch):
+def test_apply_plan_issues_exactly_create_update_delete():
     d = {
         "i-new": desired("i-new"),
         "i-drift": desired("i-drift", ip="10.0.0.9"),
@@ -225,19 +258,51 @@ def test_apply_plan_issues_exactly_create_update_delete(monkeypatch):
     assert plan.update == ["i-drift"]
     assert plan.delete == ["i-gone"]
 
-    calls = []
-
-    def runner(cmd, parse_json=False):
-        calls.append(cmd)
-        return ""
-
-    failures = apply_plan(plan, d, c, runner)
+    client = FakeTermixClient()
+    failures = apply_plan(plan, d, c, client)
     assert failures == 0
-    actions = [c[2] for c in calls]  # ["create", "update", "delete"]
+
+    actions = [action for action, _ in client.calls]
     assert actions == ["create", "update", "delete"]
     # update targets the existing termix host id, not the instance id
-    update_cmd = calls[1]
-    assert "201" in update_cmd
+    update_host_id, update_body = client.calls[1][1]
+    assert update_host_id == 201
+    assert update_body["ip"] == "10.0.0.9"
+    # delete targets the existing termix host id too
+    assert client.calls[2][1] == 202
+
+
+def test_update_host_merges_diff_onto_existing_record_not_a_replace():
+    # PUT is a confirmed full replace against the real API: update_host
+    # must merge onto the host's full existing record (TermixHost.raw),
+    # or fields the CLI/UI previously set (e.g. enableFileManager) would
+    # silently reset to their defaults on every drift-triggered update.
+    d = {"i-1": desired("i-1", ip="10.0.0.9")}
+    c = {
+        "i-1": current(
+            "i-1",
+            101,
+            ip="10.0.0.1",
+            raw={
+                "id": 101,
+                "name": "i-1",
+                "ip": "10.0.0.1",
+                "enableFileManager": True,
+                "enableDocker": True,
+                "notes": "do not touch",
+            },
+        )
+    }
+    client = FakeTermixClient()
+    apply_plan(build_plan(d, c), d, c, client)
+
+    [(_, (host_id, body))] = [c for c in client.calls if c[0] == "update"]
+    assert host_id == 101
+    assert body["ip"] == "10.0.0.9"  # the actual diff was applied
+    # fields not part of the diff survive from the existing record
+    assert body["enableFileManager"] is True
+    assert body["enableDocker"] is True
+    assert body["notes"] == "do not touch"
 
 
 def test_apply_plan_survives_non_runtimeerror_failure(caplog):
@@ -249,13 +314,14 @@ def test_apply_plan_survives_non_runtimeerror_failure(caplog):
     plan = build_plan(d, c)
     assert sorted(plan.create) == ["i-bad", "i-ok"]
 
-    def runner(cmd, parse_json=False):
-        if "i-bad" in cmd:
-            raise KeyError("boom")
-        return ""
+    class FlakyClient(FakeTermixClient):
+        def create_host(self, body):
+            if body["name"] == "i-bad":
+                raise KeyError("boom")
+            return super().create_host(body)
 
     with caplog.at_level("ERROR"):
-        failures = apply_plan(plan, d, c, runner)
+        failures = apply_plan(plan, d, c, FlakyClient())
     assert failures == 1
     assert "create failed for i-bad" in caplog.text
 

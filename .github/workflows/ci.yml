@@ -44,10 +44,10 @@ jobs:
 
       - name: Verify bundled CLI versions
         # The image's ENTRYPOINT is dedicated to termix-aws-sync itself (see
-        # docker/entrypoint.sh), so aws/termix are checked via --entrypoint.
+        # docker/entrypoint.sh), so aws is checked via --entrypoint. Termix
+        # itself is accessed via its REST API directly, not a bundled CLI.
         run: |
           docker run --rm --entrypoint aws termix-aws-sync:ci --version
-          docker run --rm --entrypoint termix termix-aws-sync:ci --version
           docker run --rm termix-aws-sync:ci --version
 
   publish:

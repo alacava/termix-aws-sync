@@ -2,15 +2,14 @@
 FROM python:3.14-slim
 
 ARG AWSCLI_VERSION=2.17.62
-ARG NODE_MAJOR=20
 
-# --- system deps: curl/unzip to fetch awscli v2, Node.js 20 LTS for the
-# termix CLI, procps for the HEALTHCHECK's pgrep ---
+# --- system deps: curl/unzip to fetch awscli v2, procps for the
+# HEALTHCHECK's pgrep. Termix is accessed via its REST API directly (see
+# termix.py's module docstring), so no Node.js/termix-cli here anymore. ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         unzip \
         ca-certificates \
-        gnupg \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
@@ -25,12 +24,6 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/awscliv2.zip /tmp/aws
-
-# --- Node.js 20 LTS + the termix CLI ---
-RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @termix-cli/cli \
-    && rm -rf /var/lib/apt/lists/*
 
 # --- the package itself ---
 WORKDIR /app

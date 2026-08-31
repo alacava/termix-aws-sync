@@ -5,7 +5,7 @@ services:
     # Swap to this (and drop `build: .`) to skip building locally:
     # image: antlac1/termix-aws-sync:latest
     restart: unless-stopped
-    env_file: .env   # TERMIX_API_KEY, SYNC_INTERVAL, optional IP_SOURCE/TERMIX_URL
+    env_file: .env   # TERMIX_API_KEY + TERMIX_URL (required), SYNC_INTERVAL, optional IP_SOURCE
     volumes:
       - ./config.toml:/etc/termix-aws-sync.toml:ro
       - ~/.aws:/home/app/.aws:ro          # profiles + credentials, read-only

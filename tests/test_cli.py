@@ -47,10 +47,23 @@ def test_missing_termix_api_key_exits_2_no_traceback(tmp_path, monkeypatch, caps
     assert "Traceback" not in captured.out
 
 
+def test_missing_termix_url_exits_2_no_traceback(tmp_path, monkeypatch, capsys, caplog):
+    monkeypatch.setenv("TERMIX_API_KEY", "fake-key")
+    monkeypatch.delenv("TERMIX_URL", raising=False)
+    config_path = write_config(tmp_path, VALID_CONFIG)
+    code = main(["--config", config_path, "--dry-run"])
+    captured = capsys.readouterr()
+    assert code == EXIT_CONFIG_ERROR
+    assert "TERMIX_URL" in caplog.text
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+
+
 def test_dry_run_with_valid_config_and_no_network_exits_2_no_traceback(
     tmp_path, monkeypatch, capsys, caplog
 ):
     monkeypatch.setenv("TERMIX_API_KEY", "fake-key")
+    monkeypatch.setenv("TERMIX_URL", "http://termix.invalid")
     monkeypatch.setenv("PATH", "/nonexistent-bin-dir")
     config_path = write_config(tmp_path, VALID_CONFIG)
     code = main(["--config", config_path, "--dry-run"])
@@ -90,23 +103,26 @@ def test_sync_interval_env_used_without_dry_run(monkeypatch):
     assert resolve_interval(args) == 42
 
 
-def test_run_cycle_never_raises_on_unexpected_termix_response_shape(tmp_path, caplog):
-    # Regression: a real Termix server returned `hosts list --json` wrapped
-    # in an object with no recognized list key. That used to raise deep
-    # inside fetch_termix_hosts as an AttributeError, which run_cycle's
-    # narrower `except RuntimeError` didn't catch -- crashing the process
-    # and, under `restart: unless-stopped`, crash-looping the container.
+def test_run_cycle_never_raises_on_unexpected_termix_client_failure(tmp_path, caplog):
+    # Regression: talking to Termix can fail in ways that raise something
+    # other than RuntimeError (e.g. a bug, or a genuinely unexpected
+    # response). run_cycle's exception handling around the fetch phase
+    # must catch any exception, not just RuntimeError -- otherwise it
+    # crashes the process and, under `restart: unless-stopped`,
+    # crash-loops the container.
     config = load_config(write_config(tmp_path, VALID_CONFIG))
 
     def runner(cmd, parse_json=False):
         if "describe-instances" in cmd:
             return []
-        if "list" in cmd:
-            return {"totally_unexpected_key": []}
         return ""
 
+    class BrokenClient:
+        def list_hosts(self):
+            raise AttributeError("simulated unexpected failure")
+
     with caplog.at_level("ERROR"):
-        code = run_cycle(config, dry_run=True, runner=runner)
+        code = run_cycle(config, dry_run=True, runner=runner, client=BrokenClient())
     assert code == EXIT_CONFIG_ERROR
     assert "failed to fetch state" in caplog.text
 
