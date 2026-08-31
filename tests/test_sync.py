@@ -3,7 +3,7 @@ import pytest
 from termix_aws_sync.aws import DesiredHost, DuplicateInstanceError, fetch_instances
 from termix_aws_sync.config import load_config
 from termix_aws_sync.sync import apply_plan, build_plan, drifted
-from termix_aws_sync.termix import TermixHost, fetch_termix_hosts
+from termix_aws_sync.termix import TermixHost, create_host, fetch_termix_hosts, update_host
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -238,6 +238,25 @@ def test_apply_plan_issues_exactly_create_update_delete(monkeypatch):
     # update targets the existing termix host id, not the instance id
     update_cmd = calls[1]
     assert "201" in update_cmd
+
+
+def test_create_and_update_omit_auth_flags_when_none_configured():
+    # No credential_id/key_file resolved (e.g. relying on a folder's
+    # assigned credential in Termix): neither --credential-id nor
+    # --key-file should be sent at all.
+    spec = desired("i-nocred", credential_id=None, key_file=None)
+    calls = []
+
+    def runner(cmd, parse_json=False):
+        calls.append(cmd)
+        return ""
+
+    create_host(spec, runner)
+    update_host(101, spec, runner)
+
+    for cmd in calls:
+        assert "--credential-id" not in cmd
+        assert "--key-file" not in cmd
 
 
 def test_apply_plan_survives_non_runtimeerror_failure(caplog):
