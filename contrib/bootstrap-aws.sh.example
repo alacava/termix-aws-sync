@@ -14,11 +14,16 @@
 #      .env as AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
 #   3. A security group in the given VPC, seeded with one SSH ingress
 #      rule for the external IP you specify, then attached to every
-#      non-terminated EC2 instance in that VPC (skip with
-#      --skip-attach-instances). This script does not touch config.toml
-#      or keep the rule in sync afterward; it's a one-time (or
-#      per-account, re-runnable) setup step, not a runtime feature of
-#      the sync tool.
+#      non-terminated EC2 instance in that VPC that actually has a
+#      public IP (an instance with no public IP can't be reached
+#      externally regardless, so it's left alone). Skip just the attach
+#      step with --skip-attach-instances, or the whole security group
+#      -- and the VPC prompt/--external-ip requirement that go with it
+#      -- with --skip-security-group, e.g. for an account reached only
+#      over VPC/VPN/Tailscale with no external access at all. This
+#      script does not touch config.toml or keep the rule in sync
+#      afterward; it's a one-time (or per-account, re-runnable) setup
+#      step, not a runtime feature of the sync tool.
 #
 # Every step checks first and is safe to re-run: it reuses what already
 # exists rather than erroring or duplicating, except access key creation,
@@ -45,19 +50,27 @@
 #   --external-ip IP       IP address to seed the security group's SSH
 #                           ingress rule with. You can also just edit the
 #                           EXTERNAL_IP="" variable below instead of passing
-#                           this flag every time.
+#                           this flag every time. Not required if
+#                           --skip-security-group is passed.
 #
 # Optional:
 #   --region NAME           Defaults to the profile's configured region.
-#   --vpc-id ID             VPC to create the security group in. If omitted,
-#                           you're prompted to pick from the VPCs in the
-#                           account/region -- pass this to skip the prompt
-#                           (e.g. for scripted/repeated runs).
+#   --vpc-id ID             VPC to create the security group in. If omitted
+#                           (and --skip-security-group isn't passed), you're
+#                           prompted to pick from the VPCs in the account/
+#                           region -- pass this to skip the prompt (e.g. for
+#                           scripted/repeated runs).
 #   --user-name NAME        Defaults to "termix-aws-sync".
 #   --sg-name NAME           Defaults to "termix-aws-sync-external".
 #   --ssh-port PORT          Defaults to 22.
 #   --skip-attach-instances  Create/update the security group but don't
-#                           attach it to every instance in the VPC.
+#                           attach it to instances in the VPC.
+#   --skip-security-group    Skip the security group entirely (creation,
+#                           ingress rule, and instance attachment) -- for
+#                           an account with no external access at all.
+#                           Also drops the --external-ip/--vpc-id
+#                           requirements. Only the IAM user/policy/key are
+#                           provisioned.
 #   -y, --yes                Skip the confirmation prompt.
 #   -h, --help                Show this help.
 
@@ -74,6 +87,7 @@ SG_NAME="termix-aws-sync-external"
 SSH_PORT="22"
 ASSUME_YES="false"
 SKIP_ATTACH="false"
+SKIP_SG="false"
 
 usage() {
     sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
@@ -89,6 +103,7 @@ while [[ $# -gt 0 ]]; do
         --sg-name) SG_NAME="$2"; shift 2 ;;
         --ssh-port) SSH_PORT="$2"; shift 2 ;;
         --skip-attach-instances) SKIP_ATTACH="true"; shift ;;
+        --skip-security-group) SKIP_SG="true"; shift ;;
         -y|--yes) ASSUME_YES="true"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
@@ -99,8 +114,8 @@ if [[ -z "$PROFILE" ]]; then
     echo "error: --profile is required (or set AWS_PROFILE)" >&2
     exit 2
 fi
-if [[ -z "$EXTERNAL_IP" ]]; then
-    echo "error: --external-ip is required (or edit EXTERNAL_IP=\"\" in this script)" >&2
+if [[ "$SKIP_SG" != "true" && -z "$EXTERNAL_IP" ]]; then
+    echo "error: --external-ip is required (or edit EXTERNAL_IP=\"\" in this script), unless --skip-security-group is passed" >&2
     exit 2
 fi
 
@@ -116,7 +131,7 @@ aws_() {
     aws --profile "$PROFILE" --region "$REGION" "$@"
 }
 
-if [[ -z "$VPC_ID" ]]; then
+if [[ "$SKIP_SG" != "true" && -z "$VPC_ID" ]]; then
     echo "No --vpc-id given; looking up VPCs in $REGION..."
     VPC_OPTIONS=()
     VPC_IDS=()
@@ -148,13 +163,18 @@ fi
 echo "About to run against:"
 echo "  profile:          $PROFILE"
 echo "  region:           $REGION"
-echo "  vpc:              $VPC_ID"
-echo "  IAM user:         $USER_NAME (inline policy: ec2:DescribeInstances only)"
-echo "  security group:   $SG_NAME (SSH ingress from $EXTERNAL_IP/32 on port $SSH_PORT)"
-if [[ "$SKIP_ATTACH" == "true" ]]; then
-    echo "  instances:        NOT attaching (--skip-attach-instances)"
+if [[ "$SKIP_SG" == "true" ]]; then
+    echo "  IAM user:         $USER_NAME (inline policy: ec2:DescribeInstances only)"
+    echo "  security group:   skipped (--skip-security-group)"
 else
-    echo "  instances:        attaching $SG_NAME to every non-terminated instance in $VPC_ID"
+    echo "  vpc:              $VPC_ID"
+    echo "  IAM user:         $USER_NAME (inline policy: ec2:DescribeInstances only)"
+    echo "  security group:   $SG_NAME (SSH ingress from $EXTERNAL_IP/32 on port $SSH_PORT)"
+    if [[ "$SKIP_ATTACH" == "true" ]]; then
+        echo "  instances:        NOT attaching (--skip-attach-instances)"
+    else
+        echo "  instances:        attaching $SG_NAME to every non-terminated instance in $VPC_ID that has a public IP"
+    fi
 fi
 echo
 
@@ -217,6 +237,15 @@ else
     echo
 fi
 
+SG_ID=""
+ATTACHED_COUNT=0
+SKIPPED_COUNT=0
+SKIPPED_NO_IP_COUNT=0
+
+if [[ "$SKIP_SG" == "true" ]]; then
+    echo "==> Skipping security group entirely (--skip-security-group)"
+else
+
 # --- 4. Security group --------------------------------------------------
 
 echo "==> Security group: $SG_NAME"
@@ -250,32 +279,45 @@ else
     echo "    added"
 fi
 
-# --- 6. Attach the security group to every instance in the VPC --------
+# --- 6. Attach the security group to instances in the VPC with a ------
+#        public IP
 #
 # modify-instance-attribute --groups REPLACES an instance's entire
 # security group list -- it does not append. Every instance's current
 # groups are read first and $SG_ID is added to that list, never sent
-# alone, so no instance ever loses a group it already had.
+# alone, so no instance ever loses a group it already had. Instances with
+# no public IP are left alone entirely -- they can't be reached over this
+# rule regardless, so there's no reason to attach an internet-facing
+# security group to them.
 
-ATTACHED_COUNT=0
-SKIPPED_COUNT=0
 if [[ "$SKIP_ATTACH" == "true" ]]; then
     echo "==> Skipping instance attachment (--skip-attach-instances)"
 else
-    echo "==> Attaching $SG_ID to instances in $VPC_ID"
+    echo "==> Attaching $SG_ID to instances in $VPC_ID with a public IP"
     INSTANCE_IDS=()
-    while IFS=$'\t' read -r iid; do
+    INSTANCE_PUBLIC_IPS=()
+    while IFS=$'\t' read -r iid pub_ip; do
         [[ -z "$iid" ]] && continue
         INSTANCE_IDS+=("$iid")
+        INSTANCE_PUBLIC_IPS+=("$pub_ip")
     done < <(aws_ ec2 describe-instances \
         --filters "Name=vpc-id,Values=$VPC_ID" \
                   "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-        --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n')
+        --query 'Reservations[].Instances[].[InstanceId,PublicIpAddress]' --output text)
 
     if [[ ${#INSTANCE_IDS[@]} -eq 0 ]]; then
         echo "    no instances found in $VPC_ID"
     else
-        for iid in "${INSTANCE_IDS[@]}"; do
+        for i in "${!INSTANCE_IDS[@]}"; do
+            iid="${INSTANCE_IDS[$i]}"
+            pub_ip="${INSTANCE_PUBLIC_IPS[$i]}"
+
+            if [[ -z "$pub_ip" || "$pub_ip" == "None" ]]; then
+                echo "    $iid: no public IP, skipping"
+                SKIPPED_NO_IP_COUNT=$((SKIPPED_NO_IP_COUNT + 1))
+                continue
+            fi
+
             CURRENT_GROUPS=()
             while IFS=$'\t' read -r gid; do
                 [[ -z "$gid" ]] && continue
@@ -306,12 +348,18 @@ else
     fi
 fi
 
+fi  # SKIP_SG
+
 # --- Summary ------------------------------------------------------------
 
 echo
 echo "Done."
 echo "  IAM user:        $USER_NAME"
-echo "  Security group:  $SG_ID ($SG_NAME)"
-if [[ "$SKIP_ATTACH" != "true" ]]; then
-    echo "  Instances:       $ATTACHED_COUNT attached, $SKIPPED_COUNT already had it."
+if [[ "$SKIP_SG" == "true" ]]; then
+    echo "  Security group:  skipped (--skip-security-group)"
+elif [[ "$SKIP_ATTACH" != "true" ]]; then
+    echo "  Security group:  $SG_ID ($SG_NAME)"
+    echo "  Instances:       $ATTACHED_COUNT attached, $SKIPPED_COUNT already had it, $SKIPPED_NO_IP_COUNT with no public IP skipped."
+else
+    echo "  Security group:  $SG_ID ($SG_NAME)"
 fi
