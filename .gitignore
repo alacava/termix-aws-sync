@@ -19,3 +19,4 @@ config.toml
 .DS_Store
 .vscode/
 .idea/
+**/bootstrap-aws.sh
