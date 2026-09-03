@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+#
+# bootstrap-aws.sh -- one-time AWS provisioning for termix-aws-sync.
+#
+# Run locally with an already-configured, higher-privileged AWS CLI
+# profile (e.g. an admin profile) to create the narrower-scoped resources
+# termix-aws-sync itself needs:
+#
+#   1. An IAM user, with an inline policy granting exactly
+#      ec2:DescribeInstances (the same minimal policy documented in
+#      README.md) -- nothing more. This is the ongoing service account;
+#      it never gets security-group permissions.
+#   2. A new access key pair for that user, printed once (put these in
+#      .env as AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+#   3. A security group in the given VPC, seeded with one SSH ingress
+#      rule for the external IP you specify -- for you to attach to
+#      whichever instances need external SSH access from that IP. This
+#      script does not touch config.toml or update the rule later; it's
+#      a one-time (or per-account, re-runnable) setup step, not a
+#      runtime feature of the sync tool.
+#
+# Every step checks first and is safe to re-run: it reuses what already
+# exists rather than erroring or duplicating, except access key creation,
+# which is skipped (not silently rotated) once a user already has the
+# IAM-enforced maximum of two keys.
+#
+# Usage:
+#   ./bootstrap-aws.sh --profile admin --vpc-id vpc-0123456789abcdef0 \
+#       --external-ip 203.0.113.10 [options]
+#
+# Required:
+#   --profile NAME        Local AWS CLI profile to run as (or set AWS_PROFILE).
+#   --vpc-id ID            VPC to create the security group in. No default --
+#                           guessing "the default VPC" is likely wrong for
+#                           accounts with custom VPC layouts.
+#   --external-ip IP       IP address to seed the security group's SSH
+#                           ingress rule with. You can also just edit the
+#                           EXTERNAL_IP="" variable below instead of passing
+#                           this flag every time.
+#
+# Optional:
+#   --region NAME           Defaults to the profile's configured region.
+#   --user-name NAME        Defaults to "termix-aws-sync".
+#   --sg-name NAME           Defaults to "termix-aws-sync-external".
+#   --ssh-port PORT          Defaults to 22.
+#   -y, --yes                Skip the confirmation prompt.
+#   -h, --help                Show this help.
+
+set -euo pipefail
+
+# --- Edit this if you'd rather not pass --external-ip every time. ---
+EXTERNAL_IP=""
+
+PROFILE="${AWS_PROFILE:-}"
+REGION=""
+VPC_ID=""
+USER_NAME="termix-aws-sync"
+SG_NAME="termix-aws-sync-external"
+SSH_PORT="22"
+ASSUME_YES="false"
+
+usage() {
+    sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --profile) PROFILE="$2"; shift 2 ;;
+        --region) REGION="$2"; shift 2 ;;
+        --vpc-id) VPC_ID="$2"; shift 2 ;;
+        --external-ip) EXTERNAL_IP="$2"; shift 2 ;;
+        --user-name) USER_NAME="$2"; shift 2 ;;
+        --sg-name) SG_NAME="$2"; shift 2 ;;
+        --ssh-port) SSH_PORT="$2"; shift 2 ;;
+        -y|--yes) ASSUME_YES="true"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
+    esac
+done
+
+if [[ -z "$PROFILE" ]]; then
+    echo "error: --profile is required (or set AWS_PROFILE)" >&2
+    exit 2
+fi
+if [[ -z "$VPC_ID" ]]; then
+    echo "error: --vpc-id is required" >&2
+    exit 2
+fi
+if [[ -z "$EXTERNAL_IP" ]]; then
+    echo "error: --external-ip is required (or edit EXTERNAL_IP=\"\" in this script)" >&2
+    exit 2
+fi
+
+if [[ -z "$REGION" ]]; then
+    REGION="$(aws configure get region --profile "$PROFILE" || true)"
+    if [[ -z "$REGION" ]]; then
+        echo "error: no --region given and profile '$PROFILE' has no configured default region" >&2
+        exit 2
+    fi
+fi
+
+aws_() {
+    aws --profile "$PROFILE" --region "$REGION" "$@"
+}
+
+echo "About to run against:"
+echo "  profile:          $PROFILE"
+echo "  region:           $REGION"
+echo "  vpc:              $VPC_ID"
+echo "  IAM user:         $USER_NAME (inline policy: ec2:DescribeInstances only)"
+echo "  security group:   $SG_NAME (SSH ingress from $EXTERNAL_IP/32 on port $SSH_PORT)"
+echo
+
+if [[ "$ASSUME_YES" != "true" ]]; then
+    read -r -p "Proceed? [y/N] " reply
+    if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+        echo "aborted."
+        exit 1
+    fi
+fi
+
+# --- 1. IAM user ------------------------------------------------------
+
+echo "==> IAM user: $USER_NAME"
+if aws_ iam get-user --user-name "$USER_NAME" >/dev/null 2>&1; then
+    echo "    already exists, reusing"
+else
+    aws_ iam create-user --user-name "$USER_NAME" >/dev/null
+    echo "    created"
+fi
+
+# --- 2. Inline policy (idempotent: put-user-policy overwrites) --------
+
+echo "==> Inline policy: ec2:DescribeInstances only"
+POLICY_JSON=$(cat <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+)
+aws_ iam put-user-policy \
+    --user-name "$USER_NAME" \
+    --policy-name "termix-aws-sync-readonly" \
+    --policy-document "$POLICY_JSON"
+echo "    applied"
+
+# --- 3. Access key (skip if already at the IAM-enforced max of 2) -----
+
+echo "==> Access key"
+EXISTING_KEYS=$(aws_ iam list-access-keys --user-name "$USER_NAME" \
+    --query 'length(AccessKeyMetadata)' --output text)
+if [[ "$EXISTING_KEYS" -ge 2 ]]; then
+    echo "    $USER_NAME already has 2 access keys (the IAM maximum) -- skipping."
+    echo "    Rotate manually (aws iam create-access-key / delete-access-key) if needed."
+else
+    read -r ACCESS_KEY_ID SECRET_ACCESS_KEY <<< "$(aws_ iam create-access-key \
+        --user-name "$USER_NAME" \
+        --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text)"
+    echo "    created -- AWS will not show the secret again. Put these in .env now:"
+    echo
+    echo "    AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID"
+    echo "    AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY"
+    echo
+fi
+
+# --- 4. Security group --------------------------------------------------
+
+echo "==> Security group: $SG_NAME"
+SG_ID=$(aws_ ec2 describe-security-groups \
+    --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" \
+    --query 'SecurityGroups[0].GroupId' --output text)
+if [[ "$SG_ID" == "None" || -z "$SG_ID" ]]; then
+    SG_ID=$(aws_ ec2 create-security-group \
+        --group-name "$SG_NAME" \
+        --description "termix-aws-sync: external SSH access" \
+        --vpc-id "$VPC_ID" \
+        --query 'GroupId' --output text)
+    echo "    created: $SG_ID"
+else
+    echo "    already exists, reusing: $SG_ID"
+fi
+
+# --- 5. Ingress rule (check first: authorize is not idempotent) -------
+
+echo "==> Ingress rule: tcp/$SSH_PORT from $EXTERNAL_IP/32"
+EXISTING_RULE=$(aws_ ec2 describe-security-groups \
+    --group-ids "$SG_ID" \
+    --query "SecurityGroups[0].IpPermissions[?IpProtocol==\`tcp\` && FromPort==\`$SSH_PORT\` && ToPort==\`$SSH_PORT\`].IpRanges[?CidrIp=='$EXTERNAL_IP/32'] | []" \
+    --output text)
+if [[ -n "$EXISTING_RULE" ]]; then
+    echo "    already present"
+else
+    aws_ ec2 authorize-security-group-ingress \
+        --group-id "$SG_ID" \
+        --protocol tcp --port "$SSH_PORT" --cidr "$EXTERNAL_IP/32" >/dev/null
+    echo "    added"
+fi
+
+# --- Summary ------------------------------------------------------------
+
+echo
+echo "Done."
+echo "  IAM user:        $USER_NAME"
+echo "  Security group:  $SG_ID ($SG_NAME)"
+echo "  Attach $SG_ID to any instance that needs external SSH access from $EXTERNAL_IP."

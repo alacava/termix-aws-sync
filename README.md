@@ -73,6 +73,22 @@ termix-aws-sync --dry-run
   }
   ```
 
+### Bootstrapping AWS access
+
+`contrib/bootstrap-aws.sh` is a standalone, manually-run script (not part
+of the Python package or its runtime) that provisions the above for you:
+run it locally with an already-configured, higher-privileged AWS CLI
+profile (e.g. an admin profile), and it creates the IAM user + the exact
+`ec2:DescribeInstances`-only inline policy above + a new access key pair
+(printed once — put it straight in `.env`), plus, separately, a security
+group seeded with one SSH ingress rule for an external IP you specify —
+for you to attach to instances that need external access. It's re-runnable
+per account and checks before creating anything, so it won't duplicate
+resources on a second run. See the script's own `--help` for details; it
+does not touch `config.toml` or keep the security group rule in sync
+afterward — that's a one-time (or per-account) setup step, not something
+this tool manages on an ongoing basis.
+
 ## A note on the Termix CLI vs. API
 
 Earlier versions of this tool drove Termix through its official CLI
